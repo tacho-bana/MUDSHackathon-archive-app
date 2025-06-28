@@ -34,11 +34,17 @@ export async function initializeWorkspaceData(): Promise<void> {
 
     if (existingWorkspace && existingWorkspace.last_sync_at) {
       console.log('Workspace data already exists, checking for updates...');
-      // Just ensure workspace is properly configured
+      // Update workspace configuration and ensure bot is in all channels
       await run(
         `UPDATE workspaces SET access_token = ? WHERE id = ?`,
         [accessToken, workspaceId]
       );
+      
+      // Join any new channels that may have been added
+      console.log('🤖 Ensuring bot is in all channels...');
+      const { joinAllChannels } = await import('./channelJoiner');
+      await joinAllChannels();
+      
       return;
     }
 

@@ -178,9 +178,30 @@ export class SlackService {
       console.log('📂 Importing channels and messages...');
       const channels = await this.getChannels();
       
+      // First, join all public channels
+      console.log('🤖 Joining all public channels first...');
+      for (const channel of channels) {
+        if (!channel.is_private) {
+          try {
+            await this.client.conversations.join({ channel: channel.id });
+            console.log(`✅ Joined public channel #${channel.name}`);
+            await new Promise(resolve => setTimeout(resolve, 100)); // Rate limit
+          } catch (error: any) {
+            if (error.data?.error === 'already_in_channel') {
+              console.log(`ℹ️  Already in #${channel.name}`);
+            } else {
+              console.log(`⚠️  Could not join #${channel.name}: ${error.data?.error || error.message}`);
+            }
+          }
+        }
+      }
+      
+      // Now import channel data and messages
       for (const channel of channels) {
         const isPrivate = channel.is_private || false;
         const password = isPrivate ? this.generateChannelPassword(channel.name) : null;
+        
+        console.log(`📂 Processing channel #${channel.name} (${isPrivate ? 'private' : 'public'})...`);
         
         await run(
           `INSERT OR REPLACE INTO channels 
@@ -207,23 +228,27 @@ export class SlackService {
         let channelMessages = 0;
         for (const message of messages) {
           if (message.user && (message.text || message.files)) {
-            await run(
-              `INSERT OR IGNORE INTO messages 
-               (id, channel_id, user_id, username, text, timestamp, thread_ts, files) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                message.ts,
-                channel.id,
-                message.user,
-                message.username || 'Unknown',
-                message.text || '',
-                new Date(parseFloat(message.ts) * 1000).toISOString(),
-                message.thread_ts || null,
-                message.files ? JSON.stringify(message.files) : null
-              ]
-            );
-            newMessages++;
-            channelMessages++;
+            try {
+              await run(
+                `INSERT OR IGNORE INTO messages 
+                 (id, channel_id, user_id, username, text, timestamp, thread_ts, files) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  message.ts,
+                  channel.id,
+                  message.user,
+                  message.username || 'Unknown',
+                  message.text || '',
+                  new Date(parseFloat(message.ts) * 1000).toISOString(),
+                  message.thread_ts || null,
+                  message.files ? JSON.stringify(message.files) : null
+                ]
+              );
+              newMessages++;
+              channelMessages++;
+            } catch (dbError) {
+              console.error(`❌ Failed to insert message ${message.ts}:`, dbError);
+            }
           }
         }
 
@@ -235,6 +260,8 @@ export class SlackService {
             [new Date(parseFloat(lastMessage.ts) * 1000).toISOString(), channel.id]
           );
         }
+        
+        console.log(`✅ Completed #${channel.name}: ${channelMessages} messages imported`);
       }
 
       console.log(`✅ Complete! Imported ${newChannels} channels with ${newMessages} total messages`);
@@ -269,43 +296,65 @@ export class SlackService {
 
     const allMessages = [];
     let cursor = '';
-    let oldest = '0'; // Start from the beginning of time
+    let requestCount = 0;
+    const maxRequests = 100; // Safety limit to prevent infinite loops
 
     try {
       do {
-        const response = await this.client.conversations.history({
-          channel: channelId,
-          limit: 1000, // Max limit for more efficient fetching
-          cursor: cursor || undefined,
-          oldest: oldest,
-          inclusive: true,
-        });
+        requestCount++;
+        if (requestCount > maxRequests) {
+          console.log(`⚠️  Reached maximum requests limit for channel ${channelId}`);
+          break;
+        }
 
-        if (response.messages) {
+        const requestParams: any = {
+          channel: channelId,
+          limit: 1000,
+          inclusive: true,
+        };
+
+        // Only add cursor if we have one (not for the first request)
+        if (cursor) {
+          requestParams.cursor = cursor;
+        } else {
+          // For the first request, start from the beginning of time
+          requestParams.oldest = '0';
+        }
+
+        console.log(`📥 Fetching messages from channel ${channelId}, page ${requestCount}...`);
+        const response = await this.client.conversations.history(requestParams);
+
+        if (response.messages && response.messages.length > 0) {
           allMessages.push(...response.messages);
-          
-          // Update oldest to the timestamp of the last message to continue from there
-          if (response.messages.length > 0) {
-            const lastMessage = response.messages[response.messages.length - 1];
-            oldest = lastMessage.ts;
-          }
+          console.log(`📥 Got ${response.messages.length} messages (total: ${allMessages.length})`);
+        } else {
+          console.log(`📥 No more messages in channel ${channelId}`);
+          break;
         }
 
         cursor = response.response_metadata?.next_cursor || '';
         
-        // Add small delay to respect rate limits
-        if (cursor) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
+        // Add delay to respect rate limits
+        await new Promise(resolve => setTimeout(resolve, 200));
       } while (cursor);
     } catch (error: any) {
       if (error.data?.error === 'not_in_channel') {
-        console.log(`⚠️  Bot not in channel ${channelId}, skipping...`);
-        return [];
+        console.log(`⚠️  Bot not in channel ${channelId}, attempting to join...`);
+        try {
+          await this.client.conversations.join({ channel: channelId });
+          console.log(`✅ Successfully joined channel ${channelId}, retrying message fetch...`);
+          // Retry once after joining
+          return await this.getAllChannelMessages(channelId);
+        } catch (joinError: any) {
+          console.log(`❌ Failed to join channel ${channelId}: ${joinError.data?.error || joinError.message}`);
+          return [];
+        }
       }
+      console.error(`❌ Error fetching messages from channel ${channelId}:`, error.data?.error || error.message);
       throw error;
     }
 
+    console.log(`✅ Completed fetching ${allMessages.length} messages from channel ${channelId}`);
     // Sort by timestamp to maintain chronological order
     return allMessages.sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
   }

@@ -60,26 +60,35 @@ router.get('/channels/:channelId/messages', async (req, res) => {
     const all = promisify(db.all.bind(db));
     const get = promisify(db.get.bind(db));
     
-    const messages = await all(`
+    console.log(`Fetching messages for channel ${channelId}, page ${page}, limit ${limit}, offset ${offset}`);
+    
+    // Get all messages without any filtering
+    const allMessages = await all(`
       SELECT m.*, u.display_name, u.avatar 
       FROM messages m
       LEFT JOIN users u ON m.user_id = u.id
-      WHERE m.channel_id = ? 
-      ORDER BY m.timestamp DESC 
-      LIMIT ? OFFSET ?
-    `, [channelId, parseInt(limit as string), offset]);
-
-    const totalCount = await get(`
-      SELECT COUNT(*) as count FROM messages WHERE channel_id = ?
+      WHERE m.channel_id = ?
+      ORDER BY m.timestamp ASC
     `, [channelId]);
+    
+    console.log(`Total messages in DB for channel ${channelId}: ${allMessages.length}`);
+    
+    // Apply pagination manually
+    const startIndex = offset;
+    const endIndex = offset + parseInt(limit as string);
+    const messages = allMessages.slice(startIndex, endIndex);
+
+    const totalCount = allMessages.length;
+
+    console.log(`Returning messages ${startIndex}-${endIndex-1} (${messages.length} messages), total count: ${totalCount}`);
 
     res.json({
-      messages: messages.reverse(),
+      messages: messages,
       pagination: {
         page: parseInt(page as string),
         limit: parseInt(limit as string),
-        total: totalCount.count,
-        hasMore: offset + messages.length < totalCount.count
+        total: totalCount,
+        hasMore: endIndex < totalCount
       }
     });
   } catch (error) {
@@ -380,8 +389,12 @@ router.get('/archive-data', async (req, res) => {
 router.post('/join-channels', async (req, res) => {
   try {
     const { joinAllChannels } = await import('../services/channelJoiner');
-    await joinAllChannels();
-    res.json({ success: true, message: 'Attempted to join all channels' });
+    const stats = await joinAllChannels();
+    res.json({ 
+      success: true, 
+      message: `Joined ${stats.joined} channels, already in ${stats.alreadyIn}, failed ${stats.failed}`,
+      stats 
+    });
   } catch (error) {
     console.error('Error joining channels:', error);
     res.status(500).json({ error: 'Failed to join channels' });
@@ -391,8 +404,12 @@ router.post('/join-channels', async (req, res) => {
 router.get('/channel-membership', async (req, res) => {
   try {
     const { checkChannelMembership } = await import('../services/channelJoiner');
-    await checkChannelMembership();
-    res.json({ success: true, message: 'Channel membership check completed' });
+    const stats = await checkChannelMembership();
+    res.json({ 
+      success: true, 
+      message: `Member of ${stats.member} channels, not member of ${stats.notMember}, ${stats.error} errors`,
+      stats 
+    });
   } catch (error) {
     console.error('Error checking channel membership:', error);
     res.status(500).json({ error: 'Failed to check channel membership' });

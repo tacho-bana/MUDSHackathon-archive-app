@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Channel, Workspace, Message, MessagesResponse } from '../types/api';
 import { useApi } from '../hooks/useApi';
 import AuthModal from './AuthModal';
@@ -11,13 +11,20 @@ interface MessageAreaProps {
 const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
   const [authenticated, setAuthenticated] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authError, setAuthError] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
   const api = useApi();
 
   useEffect(() => {
     if (channel) {
+      setMessages([]);
+      setCurrentPage(1);
+      setHasMore(true);
       checkChannelAccess();
     }
   }, [channel]);
@@ -27,7 +34,7 @@ const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
 
     if (!channel.is_private) {
       setAuthenticated(true);
-      await loadMessages();
+      await loadMessages(1, false);
       return;
     }
 
@@ -36,24 +43,38 @@ const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
 
     if (token || (channel.is_admin_only && adminToken)) {
       setAuthenticated(true);
-      await loadMessages();
+      await loadMessages(1, false);
     } else {
       setAuthenticated(false);
       setShowAuthModal(true);
     }
   };
 
-  const loadMessages = async () => {
+  const loadMessages = async (page: number = 1, append: boolean = false) => {
     if (!channel) return;
 
-    setLoading(true);
+    if (page === 1) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
+
     try {
-      const response: MessagesResponse = await api.fetchMessages(channel.id);
-      setMessages(response.messages);
+      const response: MessagesResponse = await api.fetchMessages(channel.id, page);
+      
+      if (append) {
+        setMessages(prev => [...prev, ...response.messages]);
+      } else {
+        setMessages(response.messages);
+      }
+      
+      setHasMore(response.pagination?.hasMore || false);
+      setCurrentPage(page);
     } catch (error) {
       console.error('Failed to load messages:', error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
@@ -73,7 +94,7 @@ const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
       setAuthenticated(true);
       setShowAuthModal(false);
       setAuthError('');
-      await loadMessages();
+      await loadMessages(1, false);
     } catch (error: any) {
       setAuthError(error.response?.data?.error || 'Authentication failed');
     }
@@ -203,7 +224,7 @@ const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slack-purple"></div>
@@ -283,11 +304,45 @@ const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
                 </div>
               );
             })}
+            
+            {loadingMore && (
+              <div className="flex items-center justify-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-slack-purple"></div>
+                <span className="ml-2 text-sm text-gray-500">Loading more messages...</span>
+              </div>
+            )}
+            
+            {!hasMore && messages.length > 0 && (
+              <div className="flex items-center justify-center py-4">
+                <div className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                  🎉 You've reached the beginning of this channel
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
   );
+
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current || !hasMore || loadingMore) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    const threshold = 100;
+    
+    if (scrollHeight - scrollTop - clientHeight < threshold) {
+      loadMessages(currentPage + 1, true);
+    }
+  }, [hasMore, loadingMore, currentPage]);
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (scrollElement) {
+      scrollElement.addEventListener('scroll', handleScroll);
+      return () => scrollElement.removeEventListener('scroll', handleScroll);
+    }
+  }, [handleScroll]);
 };
 
 export default MessageArea;
