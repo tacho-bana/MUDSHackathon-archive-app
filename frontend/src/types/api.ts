@@ -66,3 +66,26 @@ export interface MessagesResponse {
     hasMore: boolean;
   };
 }
+
+export interface SearchParams {
+  q: string;
+  channelId?: string;
+  userId?: string;
+  fromDate?: string;
+  toDate?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface ArchiveData {
+  workspace: Workspace;
+  channels: Channel[];
+  users: User[];
+  stats: {
+    total_messages: number;
+    channels_with_messages: number;
+    earliest_message: string;
+    latest_message: string;
+  };
+  generated_at: string;
+}

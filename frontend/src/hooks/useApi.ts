@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+// import { useState, useEffect } from 'react';
 import axios from 'axios';
+import { SearchParams, MessagesResponse, ArchiveData, User } from '../types/api';
 
 const API_BASE_URL = '/api';
 
@@ -63,6 +64,27 @@ export const useApi = () => {
     return response.data;
   };
 
+  const searchMessages = async (workspaceId: string, params: SearchParams): Promise<MessagesResponse> => {
+    const searchParams = new URLSearchParams({
+      workspaceId,
+      ...Object.fromEntries(
+        Object.entries(params).filter(([_, value]) => value !== undefined && value !== '')
+      )
+    });
+    const response = await api.get(`/search?${searchParams}`);
+    return response.data;
+  };
+
+  const fetchUsers = async (workspaceId: string): Promise<User[]> => {
+    const response = await api.get(`/users?workspaceId=${workspaceId}`);
+    return response.data;
+  };
+
+  const fetchArchiveData = async (workspaceId: string): Promise<ArchiveData> => {
+    const response = await api.get(`/archive-data?workspaceId=${workspaceId}`);
+    return response.data;
+  };
+
   return {
     fetchWorkspaces,
     fetchChannels,
@@ -75,5 +97,8 @@ export const useApi = () => {
     syncSlackData,
     getSyncStatus,
     getSyncLogs,
+    searchMessages,
+    fetchUsers,
+    fetchArchiveData,
   };
 };

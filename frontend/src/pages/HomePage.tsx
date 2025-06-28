@@ -3,7 +3,6 @@ import Layout from '../components/Layout'
 import { useApi } from '../hooks/useApi'
 
 const HomePage: React.FC = () => {
-  const [hasWorkspace, setHasWorkspace] = useState(false)
   const [loading, setLoading] = useState(true)
   const api = useApi()
 
@@ -13,22 +12,12 @@ const HomePage: React.FC = () => {
 
   const checkWorkspace = async () => {
     try {
-      const workspaces = await api.fetchWorkspaces()
-      setHasWorkspace(workspaces.length > 0)
+      await api.fetchWorkspaces()
+      // Always show Layout for this archive app
     } catch (error) {
       console.error('Failed to check workspace:', error)
-      setHasWorkspace(false)
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleSlackAuth = async () => {
-    try {
-      const { authUrl } = await api.getSlackAuthUrl()
-      window.location.href = authUrl
-    } catch (error) {
-      console.error('Failed to get Slack auth URL:', error)
     }
   }
 

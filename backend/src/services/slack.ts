@@ -146,7 +146,36 @@ export class SlackService {
     try {
       let newChannels = 0;
       let newMessages = 0;
+      let totalUsers = 0;
 
+      console.log('🚀 Starting comprehensive workspace data import...');
+
+      // Import users first
+      console.log('👥 Importing users...');
+      const users = await this.getUsers();
+      
+      for (const user of users) {
+        if (!user.deleted && !user.is_bot) {
+          await run(
+            `INSERT OR REPLACE INTO users 
+             (id, workspace_id, username, display_name, avatar, is_admin) 
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              user.id,
+              workspaceId,
+              user.name,
+              user.real_name || user.name,
+              user.profile?.image_72 || user.profile?.image_48 || user.profile?.image_24 || '',
+              user.is_admin || false
+            ]
+          );
+          totalUsers++;
+        }
+      }
+      console.log(`✅ Imported ${totalUsers} users`);
+
+      // Import channels and all their messages
+      console.log('📂 Importing channels and messages...');
       const channels = await this.getChannels();
       
       for (const channel of channels) {
@@ -170,11 +199,14 @@ export class SlackService {
         
         newChannels++;
 
-        const messages = await this.getMessages(channel.id);
+        // Get ALL messages from the beginning of time
+        console.log(`📨 Importing messages from #${channel.name}...`);
+        const messages = await this.getAllChannelMessages(channel.id);
         console.log(`📨 Found ${messages.length} messages in #${channel.name}`);
         
+        let channelMessages = 0;
         for (const message of messages) {
-          if (message.user && message.text) {
+          if (message.user && (message.text || message.files)) {
             await run(
               `INSERT OR IGNORE INTO messages 
                (id, channel_id, user_id, username, text, timestamp, thread_ts, files) 
@@ -184,36 +216,28 @@ export class SlackService {
                 channel.id,
                 message.user,
                 message.username || 'Unknown',
-                message.text,
+                message.text || '',
                 new Date(parseFloat(message.ts) * 1000).toISOString(),
                 message.thread_ts || null,
                 message.files ? JSON.stringify(message.files) : null
               ]
             );
             newMessages++;
+            channelMessages++;
           }
         }
-      }
 
-      const users = await this.getUsers();
-      
-      for (const user of users) {
-        if (!user.deleted && !user.is_bot) {
+        // Update channel last message timestamp
+        if (messages.length > 0) {
+          const lastMessage = messages[messages.length - 1];
           await run(
-            `INSERT OR REPLACE INTO users 
-             (id, workspace_id, username, display_name, avatar, is_admin) 
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-              user.id,
-              workspaceId,
-              user.name,
-              user.real_name || user.name,
-              user.profile?.image_72 || '',
-              user.is_admin || false
-            ]
+            `UPDATE channels SET last_message_at = ? WHERE id = ?`,
+            [new Date(parseFloat(lastMessage.ts) * 1000).toISOString(), channel.id]
           );
         }
       }
+
+      console.log(`✅ Complete! Imported ${newChannels} channels with ${newMessages} total messages`);
 
       await run(
         `UPDATE sync_logs 
@@ -229,6 +253,7 @@ export class SlackService {
 
       return syncId;
     } catch (error) {
+      console.error('❌ Import failed:', error);
       await run(
         `UPDATE sync_logs 
          SET completed_at = ?, status = ?, errors = ? 
@@ -237,6 +262,52 @@ export class SlackService {
       );
       throw error;
     }
+  }
+
+  async getAllChannelMessages(channelId: string): Promise<any[]> {
+    if (!this.client) throw new Error('Slack client not initialized');
+
+    const allMessages = [];
+    let cursor = '';
+    let oldest = '0'; // Start from the beginning of time
+
+    try {
+      do {
+        const response = await this.client.conversations.history({
+          channel: channelId,
+          limit: 1000, // Max limit for more efficient fetching
+          cursor: cursor || undefined,
+          oldest: oldest,
+          inclusive: true,
+        });
+
+        if (response.messages) {
+          allMessages.push(...response.messages);
+          
+          // Update oldest to the timestamp of the last message to continue from there
+          if (response.messages.length > 0) {
+            const lastMessage = response.messages[response.messages.length - 1];
+            oldest = lastMessage.ts;
+          }
+        }
+
+        cursor = response.response_metadata?.next_cursor || '';
+        
+        // Add small delay to respect rate limits
+        if (cursor) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } while (cursor);
+    } catch (error: any) {
+      if (error.data?.error === 'not_in_channel') {
+        console.log(`⚠️  Bot not in channel ${channelId}, skipping...`);
+        return [];
+      }
+      throw error;
+    }
+
+    // Sort by timestamp to maintain chronological order
+    return allMessages.sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
   }
 
   private generateChannelPassword(channelName: string): string {
@@ -290,11 +361,31 @@ export async function createSampleData(): Promise<void> {
   }
 
   const sampleMessages = [
+    // General channel messages
     { channelId: 'C001', userId: 'U001', text: 'Hello everyone! Welcome to our workspace.' },
     { channelId: 'C001', userId: 'U002', text: 'Thanks Alice! Excited to be here.' },
+    { channelId: 'C001', userId: 'U003', text: 'This Slack archive viewer is amazing! 🚀' },
+    { channelId: 'C001', userId: 'U001', text: 'Let me know if you have any questions about the project.' },
+    { channelId: 'C001', userId: 'U002', text: 'The search functionality works perfectly!' },
+    
+    // Random channel messages
     { channelId: 'C002', userId: 'U003', text: 'Anyone up for lunch?' },
+    { channelId: 'C002', userId: 'U002', text: 'I know a great sushi place nearby! 🍣' },
+    { channelId: 'C002', userId: 'U001', text: 'Count me in! What time works for everyone?' },
+    { channelId: 'C002', userId: 'U003', text: 'How about 12:30? That gives us time to finish the morning meetings.' },
+    { channelId: 'C002', userId: 'U002', text: 'Perfect! See you all at 12:30 📅' },
+    
+    // Private project channel
     { channelId: 'C003', userId: 'U001', text: 'Project update: We\'re on track for the deadline.' },
+    { channelId: 'C003', userId: 'U002', text: 'Great news! How are the API integrations coming along?' },
+    { channelId: 'C003', userId: 'U001', text: 'The Slack API integration is complete. Now working on the search features.' },
+    { channelId: 'C003', userId: 'U003', text: 'I can help with the frontend styling if needed.' },
+    { channelId: 'C003', userId: 'U001', text: 'That would be fantastic! Let\'s sync up after lunch.' },
+    
+    // Admin only channel
     { channelId: 'C004', userId: 'U001', text: 'Admin notice: Server maintenance scheduled for tonight.' },
+    { channelId: 'C004', userId: 'U001', text: 'Backup completed successfully. Maintenance window: 11 PM - 1 AM.' },
+    { channelId: 'C004', userId: 'U001', text: 'All team members have been notified via email.' },
   ];
 
   for (let i = 0; i < sampleMessages.length; i++) {

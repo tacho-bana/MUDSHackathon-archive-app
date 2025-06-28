@@ -13,6 +13,7 @@ export async function initializeWorkspaceData(): Promise<void> {
   if (!accessToken || !workspaceId || accessToken === 'xoxb-your-bot-token-here' || workspaceId === 'T123456789') {
     console.log('❌ Slack workspace not properly configured');
     console.log('Please set SLACK_ACCESS_TOKEN and SLACK_WORKSPACE_ID in .env file');
+    console.log('No sample data will be created - this app only works with real Slack data');
     return;
   }
 
@@ -41,8 +42,8 @@ export async function initializeWorkspaceData(): Promise<void> {
       return;
     }
 
-    // Skip workspace info API call (requires team:read scope)
-    const workspaceInfo = { name: 'Workspace', domain: 'workspace.slack.com' };
+    // Skip workspace info API call (requires team:read scope that may not be available)
+    const workspaceInfo = { name: `Workspace ${workspaceId}`, domain: 'workspace.slack.com' };
     
     // Create or update workspace entry
     await run(
@@ -51,15 +52,16 @@ export async function initializeWorkspaceData(): Promise<void> {
       [workspaceId, workspaceInfo.name || 'Workspace', workspaceInfo.domain || 'workspace.slack.com', accessToken, 1, 'daily']
     );
 
-    // Import all data
-    console.log('🔄 Starting data import...');
+    // Import all data from real Slack workspace
+    console.log('🔄 Starting comprehensive data import from Slack...');
     await slackService.importWorkspaceData(workspaceId);
     console.log('✅ Workspace data initialized successfully');
     
   } catch (error) {
     console.error('❌ Failed to initialize workspace data:', error);
-    if (error.message.includes('invalid_auth')) {
+    if (error.message && error.message.includes('invalid_auth')) {
       console.log('Check if your SLACK_ACCESS_TOKEN is correct and the bot is installed in the workspace');
     }
   }
 }
+

@@ -1,9 +1,9 @@
 # Slack Archive Viewer
 
-Slack APIと連携したメッセージアーカイブビューアーアプリケーション
+Slackワークスペースの全データを取得し、オフラインで閲覧可能なSlack風Webアプリケーション。トライアル期間終了後も過去のメッセージを検索・閲覧できます。
 
-## 概要
-Slack APIから指定したワークスペースのデータを取得・保存し、Slack風UIで表示するWebアプリケーションです。プライベートチャンネルにはアクセス制御機能を実装しています。
+## 🚀 概要
+Slack APIから指定したワークスペースの全データ（チャンネル・メッセージ・ユーザー・ファイル）を包括的に取得し、完全オフラインで動作するSlack風のWebアプリケーションです。
 
 ## 技術スタック
 - **フロントエンド**: React + TypeScript + Tailwind CSS
@@ -13,13 +13,21 @@ Slack APIから指定したワークスペースのデータを取得・保存�
 - **データベース**: SQLite（開発用）
 - **認証**: JWT + bcrypt
 
-## 主要機能
-- Slack OAuth 2.0認証
-- チャンネル・メッセージデータの取得・保存
-- Slack風UIでのメッセージ表示
-- プライベートチャンネルのアクセス制御
-- 自動・手動データ同期機能
-- 検索・フィルタリング機能
+## ✨ 特徴
+
+### 🎯 主要機能
+- **完全データ取得**: ワークスペースの全チャンネル・メッセージ・ユーザー情報を包括的に取得
+- **Slack風UI**: 本家Slackそっくりのデザインとユーザー体験
+- **完全オフライン**: Slack APIへの接続不要で動作（取得後）
+- **高度な検索**: メッセージ内容・ユーザー名・チャンネル・日付での絞り込み検索
+- **添付ファイル表示**: アーカイブされたファイルの表示対応
+- **レスポンシブデザイン**: デスクトップとモバイル対応
+
+### 🎨 UI特徴
+- **左サイドバー**: チャンネル一覧（パブリック・プライベート・管理者限定）
+- **メインエリア**: Slack風メッセージ表示（ユーザーアバター・時刻・グルーピング）
+- **検索バー**: 全文検索とフィルター機能
+- **認証システム**: プライベートチャンネルのパスワード保護
 
 ## プロジェクト構成
 ```
@@ -59,17 +67,27 @@ npm install
 
 ### 2. 環境変数の設定
 
-`.env.example`ファイルをコピーして`.env`ファイルを作成し、必要な値を設定してください：
+`backend/.env` ファイルを作成し、実際のSlackワークスペースの情報を設定してください：
 
-```bash
-cp .env.example .env
+```env
+# Slack API設定（必須）
+SLACK_ACCESS_TOKEN=xoxb-your-actual-bot-token
+SLACK_WORKSPACE_ID=T123456789ABCD
+
+# アプリ設定（オプション）
+SLACK_CLIENT_ID=your_slack_app_client_id
+SLACK_CLIENT_SECRET=your_slack_app_client_secret
+SLACK_REDIRECT_URI=http://localhost:3000/auth/slack/callback
+JWT_SECRET=your_jwt_secret
+ADMIN_PASSWORD=your_admin_password
+DATABASE_URL=./data/archive.db
+PORT=3000
 ```
 
-必須の環境変数：
-- `SLACK_CLIENT_ID`: Slack AppのClient ID
-- `SLACK_CLIENT_SECRET`: Slack AppのClient Secret
-- `JWT_SECRET`: JWT署名用のシークレットキー
-- `ADMIN_PASSWORD`: 管理者パスワード（デフォルト: admin123）
+**⚠️ 重要**: 
+- `SLACK_ACCESS_TOKEN`: 実際のSlack Botトークン（必須）
+- `SLACK_WORKSPACE_ID`: 実際のワークスペースID（必須）
+- これらがないとアプリは動作しません（サンプルデータも作成されません）
 
 ### 3. 開発サーバーの起動
 
